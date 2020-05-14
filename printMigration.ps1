@@ -1,30 +1,40 @@
+$logFile = "c:\tools\print-migration.log"
 $sourceServer = 'oldserver'
 $destinationServer = 'newserver'
 $errorCount = 0
 
-Write-host 'Gathering list of printers'
+if (!(Test-Path c:\tools\ -PathType Container)) {
+    New-Item -ItemType Directory -Force -Path c:\tools\
+}
+Function logWrite
+{
+   Param ([string]$logstring)
+   Add-content $logFile -value $logstring
+}
+
+logWrite 'Gathering list of printers'
 $printList = Get-Printer | Where-Object { $_.ComputerName -eq $sourceServer}
 $newprintList = Get-Printer -ComputerName $destinationServer
 
-Write-host 'Replacing printers if available on new print server'
+logWrite 'Replacing printers if available on new print server'
 $printlist | foreach {
     $printnameOnly = $_.Name -replace "[\\$sourceServer\/]"
     if ($newprintList.name.Contains($printnameOnly)) {
-      write-host "Found $printnameOnly on new server. Attempting to replace."
+      logWrite "Found $printnameOnly on new server. Attempting to replace."
       Add-Printer -ConnectionName "\\$destinationServer\$printnameOnly" -ErrorVariable installError
       if ($installError) {
-        write-host "[!] Installation of $printnameOnly was unsuccessful!"
+        logWrite "[!] Installation of $printnameOnly was unsuccessful!"
         $errorCount += 1
       }
       else {
-        write-host "$printnameOnly was successfully installed!"
-        write-host "Removing link from the old printer server for $printnameOnly."
+        logWrite "$printnameOnly was successfully installed!"
+        logWrite "Removing link from the old printer server for $printnameOnly."
         Remove-Printer -Name $_.Name
       }
     }
     else {
-      write-host "[!] $printnameOnly is not available on the new server and thus was skipped."
+      logWrite "[!] $printnameOnly is not available on the new server and thus was skipped."
       $errorCount += 1
     }
 }
-write-host "[!] You had a total of $errorCount errors. Check logs for details."
+logWrite "[!] You had a total of $errorCount errors. Check logs for details."
