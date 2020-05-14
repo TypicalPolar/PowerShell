@@ -37,4 +37,4 @@ $printlist | foreach {
       $errorCount += 1
     }
 }
-logWrite "[!] You had a total of $errorCount errors. Check logs for details."
+write-host "[!] You had a total of $errorCount errors. Check logs for details."
