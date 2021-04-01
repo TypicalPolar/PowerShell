@@ -18,11 +18,11 @@ foreach ($directory in $directoryList){
     Write-Progress -Activity 'Recreating Directory' -Status 'Removing old folder' -PercentComplete 75
     $isEmpty = Get-ChildItem $oldPath | Measure-Object
     if ( $isEmpty.Count -eq 0 ){
-    Write-Output "Successfully moved: $directory.fullname"
+    Write-Output "Successfully moved: $($directory.fullname)"
     Remove-Item $oldPath
     }
     else{
-    Write-warning "Failure to move content: $directory.fullname  (Count Count = $isEmpty )"
+    Write-warning "Failure to move content: $($directory.fullname) (Count Count = $($isEmpty) )"
     }
 
     # Complete
