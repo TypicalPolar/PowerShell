@@ -2,13 +2,20 @@ param (
     [array]$Urls
 )
 
-# General Settings
+#
+# Settings
+#
+
+# File and Storage Settings
 $StorageFolder = ($env:USERPROFILE + "\Downloads\RipMe")
 $JarFile = ($StorageFolder + "\ripme.jar")
+
+# Performance Settings
 $Threads = 5
+
+# Timeout Settings
 $CooldownTimer = 300 # Specified in Seconds
-$JobWaitInternal = 10 # Specified in Seconds
-$JobMaxNoProgressCheck = 12
+$MaxJobTime = 10 # In Minutes
 
 # Creating Folder If Missing
 if (!(Test-Path -PathType Container $StorageFolder)) {
@@ -18,16 +25,20 @@ if (!(Test-Path -PathType Container $StorageFolder)) {
 
 }
 
+#
+# Functions
+#
+
 # RipMe Function
 function Start-RipMe {
     param(
         $Url
     )
 
-    # Resetting job counters
-    $NoProgressCount = '0'
-    $JobLastOutput = ""
+    # Initial Start Message
+    Write-Host "Starting job for URL: $Url" -ForegroundColor Blue
 
+    # Running as a job for monitoring
     $DownloadJob = Start-Job -ScriptBlock {
         param(
             $JarFile,
@@ -36,57 +47,46 @@ function Start-RipMe {
             $Threads
         )
 
-        @("$JarFile","$StorageFolder","$Url","$Threads") | ForEach-Object {
-            Write-Host "Variable Result: $_"
-        }
-
         java -jar $JarFile --ripsdirectory $StorageFolder --url $Url --threads $Threads --skip404
 
     } -ArgumentList $JarFile, $StorageFolder, $Url, $Threads
 
-    # Monitoring the job
+    # Monitor: This will loop every minute until the job stops or the Max Job Time has been reached.
+
+    $JobMonitorCounter = $null # Resetting counter
+
     while ($DownloadJob.State -eq 'Running'){
 
-        $JobCurrentOutput = Receive-Job -Job $DownloadJob -Keep
+        Start-Sleep -Seconds 60
 
-        if ($JobCurrentOutput -ne $JobLastOutput){
 
-            # Refreshing progress counter
-            $NoProgressCount = '0'
-            $JobLastOutput = $JobCurrentOutput
+        if($JobMonitorCounter -ge $MaxJobTime){
+
+            Write-Host "Job has exceeded it's threshold. Terminating job...." -ForegroundColor DarkRed
+            Stop-Job -Job $DownloadJob
 
         }else{
 
-            # Increasing progress counter due to lack of progress
-            Write-Host "No progress has been made in $NoProgressCount checks."
-            $NoProgressCount++
+            $JobMonitorCounter++
+            Write-Host "- Still processing... $JobMonitorCounter minute(s) have elapsed" -ForegroundColor DarkGray
 
         }
-
-        if($NoProgressCount -ge $JobMaxNoProgressCheck){
-
-            Write-Host "Progress has ceased, terminating job"
-            Stop-Job -Job $DownloadJob
-
-        }
-
-        Start-Sleep -Seconds $JobWaitInternal
 
     }
 
     # Providing result
     if ($DownloadJob.State -eq 'Completed') {
 
-        $result = Receive-Job -Job $DownloadJob
-        Write-Host "Function completed successfully:"
+        # $result = Receive-Job -Job $DownloadJob
+        Write-Host "- The job has completed successfully!" -ForegroundColor DarkGreen
 
     } elseif ($DownloadJob.State -eq 'Stopped') {
 
-        Write-Host "Function was terminated due to lack of progress."
+        Write-Host "- The job was terminated due to lack of progress." -ForegroundColor DarkRed
 
     } else {
 
-        Write-Host "Job is in state: $($DownloadJob.State)"
+        Write-Host "- The job ended in state: $($DownloadJob.State)" -ForegroundColor DarkRed
 
     }
 
@@ -95,25 +95,30 @@ function Start-RipMe {
     
 }
 
-# Cooldown Settings
+# Variables required for cooldown counting
 $BatchCounter = 0
 $BatchLastItem = $Urls.Count
 
+# Looping through URLs and starting the functions
 $Urls | ForEach-Object {
     
     Start-RipMe -Url $_
 
-    # Cooldown
+    $BatchCounter++
+
+    # Checking if a cooldown is required based on timer
     if($BatchCounter -lt $BatchLastItem){
 
-        Write-Host "Beginning cooldown... Please wait."
+        Write-Host "- Cooldown required, please wait!"
         Start-Sleep -Seconds $CooldownTimer
 
     }else{
-        Write-Host "Last item, skipping cooldown"
+
+        Write-Host "- Cooldown is not required."
+
     }
 
-    $BatchCounter++
     
 }
 
+Write-Host "Script has ended."
