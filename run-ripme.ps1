@@ -77,32 +77,39 @@ function Start-RipMe {
     # Providing result
     if ($DownloadJob.State -eq 'Completed') {
 
-        # $result = Receive-Job -Job $DownloadJob
         Write-Host "- The job has completed successfully!" -ForegroundColor DarkGreen
+        $FinalStatus = "Completed"
 
     } elseif ($DownloadJob.State -eq 'Stopped') {
 
         Write-Host "- The job was terminated due to lack of progress." -ForegroundColor DarkRed
+        $FinalStatus = "Terminated"
 
     } else {
 
         Write-Host "- The job ended in state: $($DownloadJob.State)" -ForegroundColor DarkRed
+        $FinalStatus = "Error"
 
     }
 
     # Cleanup the job
     Remove-Job -Job $DownloadJob
     
+    Return $FinalStatus
 }
 
 # Variables required for cooldown counting
 $BatchCounter = 0
 $BatchLastItem = $Urls.Count
 
+# Creating Array for Batch Results
+$BatchResult = @()
+
 # Looping through URLs and starting the functions
 $Urls | ForEach-Object {
-    
-    Start-RipMe -Url $_
+
+    $result = $null
+    $result = Start-RipMe -Url $_
 
     $BatchCounter++
 
@@ -118,7 +125,14 @@ $Urls | ForEach-Object {
 
     }
 
-    
+    $BatchResult += [PSCustomObject]@{
+
+        Job = $_
+        Result = $result
+
+    }
 }
+
+$BatchResult
 
 Write-Host "Script has ended."
