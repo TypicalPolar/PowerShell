@@ -1,5 +1,6 @@
 param (
-    [array]$Urls
+    [array]$Urls,
+    [string]$CsvFile
 )
 
 #
@@ -24,6 +25,32 @@ if (!(Test-Path -PathType Container $StorageFolder)) {
     New-Item -ItemType Directory -Path $StorageFolder
 
 }
+
+#
+# Checks
+#
+
+# Parameter Check
+if(($Urls -and $CsvFile) -or (!($Urls) -and !($CsvFile))){
+    Write-Error "Parameters error! You must use one parameter." -ErrorAction Stop
+}
+
+# CSV File Actually Exists
+if($CsvFile){
+    if(!(Test-Path -Path $CsvFile)){
+        Write-Error "Invalid CSV Path!" -ErrorAction Stop
+    }
+}
+
+#
+# CSV Handling
+#
+
+if($CsvFile){
+    $Urls = Import-Csv -Path $CsvFile -Header URLs | 
+        Select-Object -ExpandProperty URLs
+}
+
 
 #
 # Functions
