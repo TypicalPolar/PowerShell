@@ -1,7 +1,9 @@
 param (
     [array]$Urls,
+    [string]$ResultFile = ".\result\$(Get-Date -Format 'MM-dd-yyyy_HHmmss').csv",
     [string]$CsvFile
 )
+
 
 #
 # Settings
@@ -160,6 +162,9 @@ $Urls | ForEach-Object {
     }
 }
 
-$BatchResult
+$BatchResult | Export-Csv -Path $ResultFile -NoTypeInformation
+
+return $BatchResult
+
 
 Write-Host "Script has ended."
