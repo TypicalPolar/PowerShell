@@ -1,7 +1,8 @@
 param (
     [array]$Urls,
     [string]$ResultFile = ".\result\$(Get-Date -Format 'MM-dd-yyyy_HHmmss').csv",
-    [string]$CsvFile
+    [string]$CsvFile,
+    [int]$CooldownTimer = 300
 )
 
 
@@ -9,16 +10,10 @@ param (
 # Settings
 #
 
-# File and Storage Settings
 $StorageFolder = ($env:USERPROFILE + "\Downloads\RipMe")
-$JarFile = ($StorageFolder + "\ripme.jar")
-
-# Performance Settings
-$Threads = 5
-
-# Timeout Settings
-$CooldownTimer = 300 # Specified in Seconds
-$MaxJobTime = 10 # In Minutes
+$JarFile = Join-Path -Path $StorageFolder -ChildPath "ripme.jar"
+$Threads = 5 # Thread Performance
+$MaxJobTime = 10 # Job Timeout in Minutes
 
 # Creating Folder If Missing
 if (!(Test-Path -PathType Container $StorageFolder)) {
