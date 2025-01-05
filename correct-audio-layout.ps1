@@ -10,6 +10,51 @@ param (
     $MediaInfo = "C:\Tools\Applications\MediaInfoCLI\MediaInfo.exe"
 )
 
+$StandardLayout = "L R C LFE Ls Rs"
+
+function Find-IrregularAudioLayouts {
+    param (
+        [string]$FilePath
+    )
+
+    $AudioInfo = & $MediaInfo --Output=JSON $FilePath | ConvertFrom-Json
+
+    $NonStandardChannels = $AudioInfo.media.track | Where-Object {
+
+        $_."@type" -eq "Audio" -and
+        $_.Channels -eq 6 -and
+        $_.ChannelLayout -ne $StandardLayout
+
+    }
+
+    Return $NonStandardChannels
+    
+}
+
+function Set-StandardAudioLayout {
+    param (
+        $FileData,
+        [array]$IrregularAudioNumber
+    )
+    
+    $OutputFile = (Join-Path -Path $OutputDirectory -ChildPath ($FileData.Name))
+
+    $Command = "ffmpeg -i `"$($_.FullName)`" -map 0 -c:v copy -c:a copy"
+
+    $IrregularAudioNumber | ForEach-Object {
+
+        $AudioNumber = $_-1 # Index starts at 0
+
+        $Command += " -c:a:$AudioNumber aac -channel_layout:a:$AudioNumber 5.1"
+    }
+
+    $Command += " `"$OutputFile`""
+
+    Invoke-Expression $Command
+
+}
+
+
 if(-not (Test-Path -Path $OutputDirectory)){
 
     New-Item -ItemType Directory -Force -Path $OutputDirectory
@@ -20,24 +65,21 @@ $MediaFiles = Get-ChildItem -Path $Directory | Where-Object { $_.Extension -eq "
 
 $MediaFiles | ForEach-Object {
 
-    $OutputFile = (Join-Path -Path $OutputDirectory -ChildPath ($_.Name))
+    $NonStandardTracks = Find-IrregularAudioLayouts -FilePath $_.FullName
 
-    Write-Output $OutputFile
-    ffmpeg -i $_.FullName -map 0 -c:v copy -c:a aac -channel_layout 5.1 outputfile.mkv
+    Write-Host "Processing $($_.BaseName)"
 
+    if($NonStandardTracks){
 
-}
+        $Count = ($NonStandardTracks | Measure-Object).Count
+        Write-Host "$Count track(s) located with irregular audio layouts."
 
-
-$MediaFiles[0] | ForEach-Object {
-
-    $AudioInfo = & $MediaInfo --Output=JSON $_.FullName | ConvertFrom-Json
-
-    $NonStandardChannels = $AudioInfo.media.track | Where-Object {
-
-        $_."@type" -eq "Audio" -and
-        $_.Channels -eq 6
+        Set-StandardAudioLayout `
+        -FileData $_ `
+        -IrregularAudioNumber $NonStandardTracks."@typeorder"
 
     }
+
+    Write-Host "`n"
 
 }
