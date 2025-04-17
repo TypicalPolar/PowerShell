@@ -61,7 +61,7 @@ $MediaFiles | ForEach-Object {
         $FilteredStreams |
             ForEach-Object {
 
-                $Command += " -c:a:$($_.AudioIndex) aac -b:a:$($_.AudioIndex) 320k"
+                $Command += " -c:a:$($_.AudioIndex) aac -b:a:$($_.AudioIndex) 640k -ar 48000"
                 
             }
 
@@ -73,7 +73,7 @@ $MediaFiles | ForEach-Object {
 
         Write-Output "Converting all audio streams"
 
-        $Command = "ffmpeg -i `"$($_.FullName)`" -map 0 -c:v copy -c:a aac -b:a 320k -c:s copy `"$OutputFile`""
+        $Command = "ffmpeg -i `"$($_.FullName)`" -map 0 -c:v copy -c:a aac -b:a 640k -ar 48000 -c:s copy `"$OutputFile`""
 
         Invoke-Expression $Command
 
