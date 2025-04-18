@@ -106,23 +106,15 @@ function Format-TrackCommand {
 }
 
 $Queue | ForEach-Object {
-    $SourcePath = $_.FullName
-    $DestinationPath
+    $SourceFile = $_.FullName
+    $DestinationFile = Join-Path -Path $Destination -ChildPath $_.Name
+
+    $Command = $null
+    $Command = "ffmpeg -loglevel error -i `"$SourceFile`" -map 0 -c:v copy"    
+    Get-AudioInfo -File $SourceFile | ForEach-Object {
+        $Command += Format-TrackCommand -Track $_
+    }
+    $Command += " `"$DestinationFile`""
+
+    # Invoke-Expression $Command
 }
-
-# For Testing
-$File = $Queue[0].FullName
-$TestAudioInfo = Get-AudioInfo -File $File
-Format-TrackCommand -Track $TestAudioInfo[1]
-
-$FilePath = "c:\somefile\file.mkv"
-$OutputPath = "c:\somefile\file-converted.mkv"
-$Command = $null
-$Command = "ffmpeg -i `"$FilePath`" -map 0 -c:v copy"
-
-Get-AudioInfo -File $File | ForEach-Object {
-    $Command += Format-TrackCommand -Track $_
-}
-
-$Command += " `"$OutputPath`""
-
