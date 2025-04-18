@@ -93,7 +93,7 @@ function Format-TrackCommand {
         }
     }
 
-    return $Settings
+    return " -c:a:$($Track.AudioIndex) aac -b:a:$($Track.AudioIndex) $($Settings.bitrate) -filter:a:$($Track.AudioIndex) `"channelmap=channel_layout=$($Settings.layout)`"" 
         
 }
 
