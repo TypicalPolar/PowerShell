@@ -3,6 +3,14 @@ param (
     [string]
     $Source,
     [string]
+    $Destination = (
+        Join-Path `
+        -Path (Get-ChildItem -Path $Source | 
+        Where-Object {$_.DirectoryName} | 
+        Select-Object -ExpandProperty DirectoryName -First 1) `
+        -ChildPath "\Converted"
+    ),
+    [string]
     $MediaInfo = "C:\Tools\Applications\MediaInfoCLI\MediaInfo.exe"    
 )
 
@@ -97,6 +105,11 @@ function Format-TrackCommand {
         
 }
 
+$Queue | ForEach-Object {
+    $SourcePath = $_.FullName
+    $DestinationPath
+}
+
 # For Testing
 $File = $Queue[0].FullName
 $TestAudioInfo = Get-AudioInfo -File $File
@@ -112,3 +125,4 @@ Get-AudioInfo -File $File | ForEach-Object {
 }
 
 $Command += " `"$OutputPath`""
+
