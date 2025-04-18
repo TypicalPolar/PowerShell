@@ -93,7 +93,7 @@ function Format-TrackCommand {
         }
     }
 
-    return " -c:a:$($Track.AudioIndex) aac -b:a:$($Track.AudioIndex) $($Settings.bitrate) -filter:a:$($Track.AudioIndex) `"channelmap=channel_layout=$($Settings.layout)`"" 
+    return " -c:a:$($Track.AudioIndex) aac -b:a:$($Track.AudioIndex) $($Settings.bitrate) -filter:a:$($Track.AudioIndex) `"aresample=48000,channelmap=channel_layout=$($Settings.layout)`"" 
         
 }
 
@@ -101,3 +101,14 @@ function Format-TrackCommand {
 $File = $Queue[0].FullName
 $TestAudioInfo = Get-AudioInfo -File $File
 Format-TrackCommand -Track $TestAudioInfo[1]
+
+$FilePath = "c:\somefile\file.mkv"
+$OutputPath = "c:\somefile\file-converted.mkv"
+$Command = $null
+$Command = "ffmpeg -i `"$FilePath`" -map 0 -c:v copy"
+
+Get-AudioInfo -File $File | ForEach-Object {
+    $Command += Format-TrackCommand -Track $_
+}
+
+$Command += " `"$OutputPath`""
