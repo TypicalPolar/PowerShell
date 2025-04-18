@@ -14,9 +14,6 @@ param (
     $MediaInfo = "C:\Tools\Applications\MediaInfoCLI\MediaInfo.exe"    
 )
 
-# For Testing
-$Source = ""
-
 $Queue = Get-ChildItem -Path $Source
 
 function Get-AudioInfo {
@@ -54,7 +51,7 @@ function Format-TrackCommand {
         "1" {
             @{
                 "ac" = 1
-                "layout" = "1.0"
+                "layout" = "mono"
                 "bitrate" = "128k"
             }
             break
@@ -62,7 +59,7 @@ function Format-TrackCommand {
         "2" {
             @{
                 "ac" = 2
-                "layout" = "2.0"
+                "layout" = "stereo"
                 "bitrate" = "320k"
             }
             break
@@ -105,16 +102,20 @@ function Format-TrackCommand {
         
 }
 
-$Queue | ForEach-Object {
+New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+
+$Queue | Sort-Object Name | ForEach-Object {
     $SourceFile = $_.FullName
     $DestinationFile = Join-Path -Path $Destination -ChildPath $_.Name
 
     $Command = $null
-    $Command = "ffmpeg -loglevel error -i `"$SourceFile`" -map 0 -c:v copy"    
+    $Command = "ffmpeg -loglevel fatal -i `"$SourceFile`" -map 0 -c:v copy"    
     Get-AudioInfo -File $SourceFile | ForEach-Object {
         $Command += Format-TrackCommand -Track $_
     }
     $Command += " `"$DestinationFile`""
 
-    # Invoke-Expression $Command
+    Write-Host "Started Encoding: $($_.Name)"
+    Invoke-Expression $Command
+    Write-Host "Encode has completed!`n"
 }
