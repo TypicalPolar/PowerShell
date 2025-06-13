@@ -34,11 +34,23 @@ function Watch-ListeningPorts {
     
 }
 
-function TestParseXML {
+function Export-FilteredCSV {
+    param (
+        [string]$FilePath
+    )
 
-    [xml]$Test = Get-Content -Path "C:\Tools\PortDiscoveryMonitor\Logs\2025-06-12_19-06-36.xml"
-    $Test.tcp_udp_ports_list.item | Where-Object { $_.state -like "Listening" } |
-    Select-Object process_path, protocol, local_port, local_port_name, local_address, state, file_description
+    $CSVPath = Join-Path -Path $LogDirectory -ChildPath ((Get-Item -Path $FilePath).BaseName + ".csv")
+
+    ([xml]$(Get-Content -Path $FilePath)).tcp_udp_ports_list.item |
+    Where-Object { $_.state -like "Listening" } |
+    Select-Object `
+        process_path, 
+        protocol, local_port, 
+        local_port_name, 
+        local_address, 
+        state, 
+        file_description |
+    Export-Csv -NoTypeInformation -Path $CSVPath
     
 }
 
