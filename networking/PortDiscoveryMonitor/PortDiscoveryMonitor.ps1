@@ -1,5 +1,6 @@
 param(
-    [switch]$Monitor
+    [switch]$Monitor,
+    [switch]$Merge
 )
 
 $Directory = "C:\Tools\PortDiscoveryMonitor\"
@@ -89,6 +90,58 @@ function Set-ScheduledTask {
 
 }
 
+function Set-ScheduledMergeTask {
+
+    $TaskName = "Port Discovery Monitor - Daily Consolidation"
+
+    if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+    }
+
+    $Action = New-ScheduledTaskAction -Execute "powershell.exe" `
+        -Argument "-NoProfile -NoLogo -NonInteractive -ExecutionPolicy Bypass -File `"$ScriptPath`" -Merge"
+
+    $Trigger = New-ScheduledTaskTrigger -Daily -At "12:30AM"
+
+    $Principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
+
+    $Settings = New-ScheduledTaskSettingsSet `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries `
+        -StartWhenAvailable `
+        -MultipleInstances Parallel
+
+    Register-ScheduledTask -TaskName $TaskName `
+        -Action $Action `
+        -Trigger $Trigger `
+        -Principal $Principal `
+        -Settings $Settings
+
+}
+
+function Merge-IntoDailyCSVs {
+    param (
+        $Date 
+    )
+    
+    $Files = Get-ChildItem "$LogDirectory\*$Date*.csv"
+
+    if ($Files) {
+        $OutFile = "$LogDirectory\$Date.csv"
+        $Files | Select-Object -First 1 | ForEach-Object {
+            Get-Content $_ | Out-File $OutFile -Encoding UTF8
+        }
+        $Files | Select-Object -Skip 1 | ForEach-Object {
+            Get-Content $_ | Select-Object -Skip 1 | Out-File $OutFile -Append -Encoding UTF8
+        }
+        $Files | Remove-Item -Force
+        Write-Host "- Files have been merged and cleaned."
+    } else {
+        Write-Host "No matching files found for $Date."
+    }
+
+}
+
 
 if($Monitor){
 
@@ -104,6 +157,12 @@ if($Monitor){
     Write-Host "- Cleaning Up"
     Remove-Item -Path $XMLFile -Force
 
+
+}elseif ($Merge) {
+    
+    Write-Host "Port Discovery Monitor -- Daily Merge" -ForegroundColor Green
+
+    Merge-IntoDailyCSVs -Date (Get-Date).AddDays(-1).ToString("yyyy-MM-dd")
 
 }else{
 
@@ -121,6 +180,7 @@ if($Monitor){
     # Creating/Updating Scheduled Task
     Write-Host "- Creating/Setting Scheduled Task"
     Set-ScheduledTask | Out-Null
+    Set-ScheduledMergeTask | Out-Null
 
     # Making a Copy of Itself and Place In Directory
     Write-Host "- Copying Script into Run Directory"
