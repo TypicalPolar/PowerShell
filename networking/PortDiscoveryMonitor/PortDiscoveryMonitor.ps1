@@ -1,9 +1,7 @@
 $Directory = "C:\Tools\PortDiscoveryMonitor\"
 $LogDirectory = Join-Path -Path $Directory -ChildPath "Logs"
 $CurrPorts = Join-Path -Path $Directory -ChildPath "\cports\cports.exe"
-
-New-Item -ItemType Directory -Path $Directory -Force
-New-Item -ItemType Directory -Path $LogDirectory -Force
+$ScriptPath = Join-Path -Path $Directory -ChildPath "PortDiscoveryMonitor.ps1"
 
 
 function Get-CurrPorts {
@@ -23,7 +21,7 @@ function Watch-ListeningPorts {
     $LogFile = Join-Path -Path $LogDirectory -ChildPath ($Timestamp + ".xml")
     & $CurrPorts /sxml $LogFile `
     /StartAsHidden `
-    /CaptureTime "120" `
+    /CaptureTime "54000" `
     /DisplayIPv6Ports 0 `
     /DisplayListening 1 `
     /DisplayEstablished 0 `
@@ -54,13 +52,58 @@ function Export-FilteredCSV {
     
 }
 
-if(Test-Path -path $CurrPorts){
+function Set-ScheduledTask {
 
-    Write-Host "CurrPorts Detected!"
+    $TaskName = "Port Discovery Monitor - Run Every 15 Minutes"
+
+    if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+    }
+
+    $Action = New-ScheduledTaskAction -Execute "powershell.exe" `
+        -Argument "-NoProfile -NoLogo -NonInteractive -ExecutionPolicy Bypass -File `"$ScriptPath`" -Monitor"
+
+    $Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date `
+        -RepetitionInterval (New-TimeSpan -Minutes 15) `
+        -RepetitionDuration (New-TimeSpan -Days 1)
+
+    $Principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
+
+    $Settings = New-ScheduledTaskSettingsSet `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries `
+        -StartWhenAvailable `
+        -MultipleInstances Parallel
+
+    Register-ScheduledTask -TaskName $TaskName `
+        -Action $Action `
+        -Trigger $Trigger `
+        -Principal $Principal `
+        -Settings $Settings
+
+}
+
+
+if($Monitor){
 
 }else{
 
-    Write-Host "Downloading CurrPorts"
+    Write-Host "Port Discovery Monitor -- Running Initial Installation" -ForegroundColor Green
+
+    # Creating important directories
+    Write-Host "- Creating Essential Directories"
+    New-Item -ItemType Directory -Path $Directory -Force
+    New-Item -ItemType Directory -Path $LogDirectory -Force
+
+    # Downloading CurrPorts
+    Write-Host "- Downloading CurrPorts"
     Get-CurrPorts
-    
+
+    # Creating/Updating Scheduled Task
+    Write-Host "- Creating/Setting Scheduled Task"
+    Set-ScheduledTask
+
+    # Making a Copy of Itself and Place In Directory
+    Copy-Item -Path $MyInvocation.MyCommand.Path -Destination $ScriptPath -Force
+
 }
