@@ -3,6 +3,8 @@ param(
     [switch]$Merge
 )
 
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
 $Directory = "C:\Tools\PortDiscoveryMonitor\"
 $LogDirectory = Join-Path -Path $Directory -ChildPath "Logs"
 $CurrPorts = Join-Path -Path $Directory -ChildPath "\cports\cports.exe"
