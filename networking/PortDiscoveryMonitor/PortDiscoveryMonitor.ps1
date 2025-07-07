@@ -62,31 +62,69 @@ function Export-FilteredCSV {
 function Set-ScheduledTask {
 
     $TaskName = "Port Discovery Monitor - Run Every 15 Minutes"
-
+    $EscapedScriptPath = $ScriptPath.Replace('&', '&amp;').Replace('<', '&lt;').Replace('>', '&gt;').Replace('"', '&quot;')
+    $XmlPath = "$env:TEMP\TaskData.xml"
+    $StartTime = (Get-Date -Hour 0 -Minute 0 -Second 0).ToString("yyyy-MM-ddTHH:mm:ss")
+    
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
     }
 
-    $Action = New-ScheduledTaskAction -Execute "powershell.exe" `
-        -Argument "-NoProfile -NoLogo -NonInteractive -ExecutionPolicy Bypass -File `"$ScriptPath`" -Monitor"
+$xmlContent = @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Run monitoring script every 15 minutes forever</Description>
+  </RegistrationInfo>
+  <Principals>
+    <Principal id="Author">
+      <UserId>SYSTEM</UserId>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Triggers>
+    <CalendarTrigger>
+      <StartBoundary>2025-07-06T00:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+      <ScheduleByDay>
+        <DaysInterval>1</DaysInterval>
+      </ScheduleByDay>
+      <Repetition>
+        <Interval>PT15M</Interval>
+        <Duration>P9999D</Duration>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+    </CalendarTrigger>
+  </Triggers>
+  <Actions Context="Author">
+    <Exec>
+      <Command>powershell.exe</Command>
+      <Arguments>-NoProfile -NoLogo -NonInteractive -ExecutionPolicy Bypass -File "C:\Tools\PortDiscoveryMonitor\PortDiscoveryMonitor.ps1" -Monitor</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+"@
 
-    $Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date `
-        -RepetitionInterval (New-TimeSpan -Minutes 15) `
-        -RepetitionDuration (New-TimeSpan -Days 1)
-
-    $Principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
-
-    $Settings = New-ScheduledTaskSettingsSet `
-        -AllowStartIfOnBatteries `
-        -DontStopIfGoingOnBatteries `
-        -StartWhenAvailable `
-        -MultipleInstances Parallel
-
-    Register-ScheduledTask -TaskName $TaskName `
-        -Action $Action `
-        -Trigger $Trigger `
-        -Principal $Principal `
-        -Settings $Settings
+    $xmlContent | Out-File -FilePath $XmlPath -Encoding Unicode
+    schtasks /Create /TN $TaskName /XML $XmlPath /RU SYSTEM /F
 
 }
 
