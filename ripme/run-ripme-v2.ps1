@@ -87,7 +87,7 @@ function Invoke-Rip {
 
     while ((Get-Job -Id $CurrentJob.Id).State -eq 'Running'){
         if ($Timer.Elapsed.TotalMinutes -ge $TimeoutMinutes){
-            Stop-Job -Job $CurrentJob -Force
+            Stop-Job -Job $CurrentJob
             Write-Host "Job Terminated: Timeout threshold has been exceeded"
             Wait-Job -Id $CurrentJob.Id -Timeout 3 | Out-Null
             Break
