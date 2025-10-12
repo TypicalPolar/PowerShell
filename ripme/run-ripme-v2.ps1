@@ -64,7 +64,9 @@ function Invoke-Rip {
         [string]$Url
     )
 
-    $CurrentJob = $null
+    $CurrentJob =   $null
+    $Timer =        $null
+    
     $CurrentJob = Start-Job -ScriptBlock {
         param($JarFile, $Output, $Url, $Threads)
         
