@@ -66,7 +66,8 @@ function Invoke-Rip {
 
     $CurrentJob =   $null
     $Timer =        $null
-    
+    $JobStatus =    $null
+
     $CurrentJob = Start-Job -ScriptBlock {
         param($JarFile, $Output, $Url, $Threads)
         
@@ -84,27 +85,36 @@ function Invoke-Rip {
 
     $Timer = [Diagnostics.Stopwatch]::StartNew()
 
-    while($CurrentJob.State -eq 'Running'){
-        if ($Timer.Elapsed.Minutes -ge $TimeoutMinutes){
-            Stop-Job -Job $CurrentJob
+    while ((Get-Job -Id $CurrentJob.Id).State -eq 'Running'){
+        if ($Timer.Elapsed.TotalMinutes -ge $TimeoutMinutes){
+            Stop-Job -Job $CurrentJob -Force
+            Write-Host "Job Terminated: Timeout threshold has been exceeded"
+            Wait-Job -Id $CurrentJob.Id -Timeout 3 | Out-Null
+            Break
         }
-    }else{
-
+        Start-Sleep -Milliseconds 200
     }
-
-    Write-Host $CurrentJob.State
 
     $Timer.Stop()
 
+    # Storing output for debugging
+    # $JobOutput = Receive-Job -Job $CurrentJob -Keep -ErrorAction Continue `
+    # -OutVariable JobOutput -ErrorVariable JobErrors
+
+    $JobStatus = (Get-Job -Id $CurrentJob.Id).State
+
     Remove-Job -Job $CurrentJob
 
-    if($DownloadJob.State -eq 'Completed'){
+    if($JobStatus -eq 'Completed'){
+        Write-Host = "Job Succeeded"
         return "Completed"
-    } elseif ($DownloadJob.State -eq 'Stopped'){
+    } elseif ($JobStatus -eq 'Stopped'){
         return "Timed Out"
     } else {
         return "Error"
     }
+
+    
 }
 
 # Pre-Flight Checks
@@ -137,7 +147,8 @@ $Urls = (
 
 $Urls | ForEach-Object {
     
-    $Result
+    Write-Host "Starting to Process: $_"
+    $Result = $null
     $Result = Invoke-Rip -Url $_
 
     Write-Log -Level "Info" -Category $Result -Message $_
