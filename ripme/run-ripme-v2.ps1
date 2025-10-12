@@ -88,6 +88,8 @@ function Invoke-Rip {
 
     $Timer.Stop()
 
+    Remove-Job -Job $CurrentJob
+
     if($DownloadJob.State -eq 'Completed'){
         return "Completed"
     } elseif ($DownloadJob.State -eq 'Stopped'){
@@ -103,7 +105,7 @@ if (-not (Test-Path -LiteralPath $Directory)) {
 }
 
 if (-not (Test-Path -LiteralPath $JarFile)) {
-    throw "Jar file not found at '$JarFile'."
+    throw "RipMe jar file is missing at this location: '$JarFile'."
 }
 
 @($Output, (Split-Path -Parent $LogFile)) | ForEach-Object {
@@ -114,7 +116,7 @@ if (-not (Test-Path -LiteralPath $JarFile)) {
 }
 
 if (-not (Get-Command java -ErrorAction SilentlyContinue)) {
-    throw "Java is not available on PATH. Please install it or add it to PATH."
+    throw "Java is not installed or is missing from environment variables."
 }
 
 # Queue List
@@ -129,5 +131,12 @@ $Urls | ForEach-Object {
     
     $Result
     $Result = Invoke-Rip -Url $_
+
+    Write-Log -Level "Info" -Category $Result -Message $_
+
+    if($_ -ne $Urls[-1]){
+        Write-Host "Cooldown has begun, please wait..."
+        Start-Sleep -Seconds $CooldownSeconds
+    }
 
 }
