@@ -64,8 +64,10 @@ function Invoke-Rip {
         [string]$Url
     )
 
+    $CurrentJob = $null
     $CurrentJob = Start-Job -ScriptBlock {
-
+        param($JarFile, $Output, $Url, $Threads)
+        
         $Arguments = @(
             '-jar', $JarFile
             '--ripsdirectory', $Output
@@ -74,7 +76,7 @@ function Invoke-Rip {
             '--skip404'
         )
 
-        Start-Process "Java"  -ArgumentList $Arguments -NoNewWindow -Wait
+        Java $Arguments
 
     } -ArgumentList $JarFile, $Output, $Url, $Threads
 
@@ -84,7 +86,11 @@ function Invoke-Rip {
         if ($Timer.Elapsed.Minutes -ge $TimeoutMinutes){
             Stop-Job -Job $CurrentJob
         }
+    }else{
+
     }
+
+    Write-Host $CurrentJob.State
 
     $Timer.Stop()
 
