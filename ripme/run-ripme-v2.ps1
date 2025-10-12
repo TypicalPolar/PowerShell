@@ -29,19 +29,72 @@ param(
 )
 
 # Functions
-function Invoke-Rip {
+function Write-Log {
+    [CmdletBinding()]
     param (
-        $Url
+        [Parameter(Mandatory)]
+        [ValidateSet('Info','Warning','Error','Debug')]
+        [string]$Level,
+
+        [string]$Category,
+
+        [Parameter(Mandatory)]
+        [string]$Message,
+
+        [string]$LogPath = $LogFile
     )
 
-    $Arguments = @(
-        '-jar', $JarFile
-        '--ripsdirectory', $Output
-        '--url', $Url
-        '--threads', $Threads
-        '--skip404'
+    if (-not (Test-Path (Split-Path $LogPath))) {
+        New-Item -ItemType Directory -Path (Split-Path $LogPath) -Force
+    }
+
+    $LogEntry = [PSCustomObject]@{
+        Timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+        Level     = $Level
+        Category  = $Category
+        Message   = $Message
+    }
+
+    $LogEntry | Export-Csv -Path $LogPath -Append -NoTypeInformation -Encoding UTF8 | Out-Null
+}
+
+function Invoke-Rip {
+    param (
+        [Parameter(Mandatory)]
+        [string]$Url
     )
-    
+
+    $CurrentJob = Start-Job -ScriptBlock {
+
+        $Arguments = @(
+            '-jar', $JarFile
+            '--ripsdirectory', $Output
+            '--url', $Url
+            '--threads', $Threads
+            '--skip404'
+        )
+
+        Start-Process "Java"  -ArgumentList $Arguments -NoNewWindow -Wait
+
+    } -ArgumentList $JarFile, $Output, $Url, $Threads
+
+    $Timer = [Diagnostics.Stopwatch]::StartNew()
+
+    while($CurrentJob.State -eq 'Running'){
+        if ($Timer.Elapsed.Minutes -ge $TimeoutMinutes){
+            Stop-Job -Job $CurrentJob
+        }
+    }
+
+    $Timer.Stop()
+
+    if($DownloadJob.State -eq 'Completed'){
+        return "Completed"
+    } elseif ($DownloadJob.State -eq 'Stopped'){
+        return "Timed Out"
+    } else {
+        return "Error"
+    }
 }
 
 # Pre-Flight Checks
@@ -71,3 +124,10 @@ $Urls = (
         Where-Object { $_ -and ($_ -notmatch '^\s*#') } | # ignore blanks and '# comments'
         Select-Object -Unique
 )
+
+$Urls | ForEach-Object {
+    
+    $Result
+    $Result = Invoke-Rip -Url $_
+
+}
