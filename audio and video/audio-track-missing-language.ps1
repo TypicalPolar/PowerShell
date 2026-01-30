@@ -16,7 +16,7 @@ function Get-AudioTracks {
 
 }
 
-$Directory = "M:\Series\Is It Wrong to Try to Pick Up Girls in a Dungeon\S02"
+$Directory = ""
 
 Get-ChildItem -LiteralPath $Directory |
 Where-Object { $_.Extension -like "*mkv*"} |
