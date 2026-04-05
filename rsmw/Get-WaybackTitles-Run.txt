@@ -1,0 +1,25 @@
+$subforumfolder = "C:\example\93,94"
+
+(Get-ChildItem $subforumfolder) | Select-Object -ExpandProperty FullName | ForEach-Object {
+
+$jsonfile =  $_
+$itemdetails = Get-Item -Path $jsonfile | select-object BaseName, Name, Directory, FullName
+$resultfile = Join-Path -Path $itemdetails.Directory -ChildPath ( $itemdetails.BaseName + "-results.csv" )
+$logfile = Join-Path -Path $itemdetails.Directory -ChildPath ( $itemdetails.BaseName + "-attempt-log.csv" )
+
+  Set-ExecutionPolicy Bypass -Scope Process -Force; & "C:\example\Get-WaybackTitles.ps1" `
+  -JsonPath $jsonfile `
+  -ResultsCsvPath $resultfile `
+  -AttemptLogPath $logfile `
+  -DiscoveryBehavior Normal `
+  -GenericTitlePatterns @(
+    'RuneScape - The Number 1 Free Multiplayer Game',
+    'RuneScape - the massive online adventure game by Jagex Ltd',
+	'RuneScape - MMORPG - The No.1 Free Online Multiplayer Game',
+	'RuneScape - the massive online adventure game by Jagex Games Studio'
+  ) `
+  -GenericTitleReplacementRules @(
+    'DivClassTitleThrd'
+  )
+
+}
