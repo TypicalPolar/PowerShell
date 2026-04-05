@@ -1,6 +1,9 @@
 $subforumfolder = "C:\example\93,94"
 
-(Get-ChildItem $subforumfolder) | Select-Object -ExpandProperty FullName | ForEach-Object {
+(Get-ChildItem $subforumfolder) |
+Where-Object {$_.Extension -like ".json"} |
+Select-Object -ExpandProperty FullName |
+ForEach-Object {
 
 $jsonfile =  $_
 $itemdetails = Get-Item -Path $jsonfile | select-object BaseName, Name, Directory, FullName
