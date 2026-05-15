@@ -19,14 +19,26 @@ param(
     [string]$JarFile =      (Join-Path -Path $Directory -ChildPath "ripme.jar"),
     [string]$LogFile = (
         Join-Path -Path ( Join-Path -Path $Directory -ChildPath 'Logs') `
-            -ChildPath ("{0:MM-dd-yyyy_HHmmss}.csv" -f (Get-Date)
+            -ChildPath ("{0:yyyy-MM-dd_HHmmss}.csv" -f (Get-Date)
         )
     ),
 
+    [ValidateRange(0, [int]::MaxValue)]
     [int]$CooldownSeconds = 300,
+
+    [ValidateRange(1, 1440)]
     [int]$TimeoutMinutes =  10,
+
+    [ValidateRange(1, 32)]
     [int]$Threads =         5
 )
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+# Shared run identifier — used to correlate the CSV log with per-URL stdout/stderr files in %TEMP%
+$RunTimestamp = [IO.Path]::GetFileNameWithoutExtension($LogFile)
+$TempPrefix   = Join-Path $env:TEMP "ripme_$RunTimestamp"
 
 # Functions
 function Write-Log {
@@ -36,85 +48,131 @@ function Write-Log {
         [ValidateSet('Info','Warning','Error','Debug')]
         [string]$Level,
 
-        [string]$Category,
+        [string]$Status,
 
         [Parameter(Mandatory)]
-        [string]$Message,
+        [string]$Url,
+
+        [int]$ExitCode = -1,
+        [double]$DurationSeconds = 0,
+        [string]$StdOutPath = '',
+        [string]$StdErrPath = '',
 
         [string]$LogPath = $LogFile
     )
 
-    if (-not (Test-Path (Split-Path $LogPath))) {
-        New-Item -ItemType Directory -Path (Split-Path $LogPath) -Force
+    $LogDir = Split-Path $LogPath
+    if (-not (Test-Path $LogDir)) {
+        New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
     }
 
     $LogEntry = [PSCustomObject]@{
-        Timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-        Level     = $Level
-        Category  = $Category
-        Message   = $Message
+        Timestamp       = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+        Level           = $Level
+        Status          = $Status
+        Url             = $Url
+        ExitCode        = $ExitCode
+        DurationSeconds = [math]::Round($DurationSeconds, 1)
+        StdOutPath      = $StdOutPath
+        StdErrPath      = $StdErrPath
     }
 
-    $LogEntry | Export-Csv -Path $LogPath -Append -NoTypeInformation -Encoding UTF8 | Out-Null
+    $LogEntry | Export-Csv -Path $LogPath -Append -NoTypeInformation -Encoding UTF8
 }
 
 function Invoke-Rip {
+    [CmdletBinding()]
     param (
         [Parameter(Mandatory)]
-        [string]$Url
+        [string]$Url,
+
+        [Parameter(Mandatory)]
+        [int]$Index
     )
 
-    $CurrentJob =   $null
-    $Timer =        $null
-    $JobStatus =    $null
+    $IndexStr   = '{0:D3}' -f $Index
+    $StdOutPath = "${TempPrefix}_${IndexStr}.stdout.log"
+    $StdErrPath = "${TempPrefix}_${IndexStr}.stderr.log"
 
-    $CurrentJob = Start-Job -ScriptBlock {
-        param($JarFile, $Output, $Url, $Threads)
-        
-        $Arguments = @(
-            '-jar', $JarFile
-            '--ripsdirectory', $Output
-            '--url', $Url
-            '--threads', $Threads
-            '--skip404'
-        )
+    $Arguments = @(
+        '-jar', $JarFile
+        '--ripsdirectory', $Output
+        '--url', $Url
+        '--threads', $Threads
+        '--skip404'
+    )
 
-        Java $Arguments
+    $Proc      = $null
+    $TimedOut  = $false
+    $Stopwatch = [Diagnostics.Stopwatch]::StartNew()
+    $TimeoutMs = $TimeoutMinutes * 60 * 1000
 
-    } -ArgumentList $JarFile, $Output, $Url, $Threads
+    try {
+        $Proc = Start-Process -FilePath 'java' `
+            -ArgumentList $Arguments `
+            -NoNewWindow -PassThru `
+            -RedirectStandardOutput $StdOutPath `
+            -RedirectStandardError  $StdErrPath
 
-    $Timer = [Diagnostics.Stopwatch]::StartNew()
-
-    while ((Get-Job -Id $CurrentJob.Id).State -eq 'Running'){
-        if ($Timer.Elapsed.TotalMinutes -ge $TimeoutMinutes){
-            Stop-Job -Job $CurrentJob
-            Write-Host "Job Terminated: Timeout threshold has been exceeded"
-            Wait-Job -Id $CurrentJob.Id -Timeout 3 | Out-Null
-            Break
+        while (-not $Proc.WaitForExit(1000)) {
+            if ($Stopwatch.ElapsedMilliseconds -ge $TimeoutMs) {
+                $TimedOut = $true
+                break
+            }
+            $Pct = [math]::Min(100, ($Stopwatch.ElapsedMilliseconds / $TimeoutMs) * 100)
+            Write-Progress -Id 1 -ParentId 0 -Activity "Ripping: $Url" `
+                -Status ("Elapsed {0:N0}s / Timeout {1}s" -f $Stopwatch.Elapsed.TotalSeconds, ($TimeoutMinutes * 60)) `
+                -PercentComplete $Pct
         }
-        Start-Sleep -Milliseconds 200
+
+        if ($TimedOut) {
+            # /T = tree, /F = force. Kills java + any descendants even if shutdown hooks hang.
+            & taskkill.exe /PID $Proc.Id /T /F 1>$null 2>$null
+            $Proc.WaitForExit(5000) | Out-Null
+        }
+    }
+    finally {
+        $Stopwatch.Stop()
+        Write-Progress -Id 1 -ParentId 0 -Activity "Ripping: $Url" -Completed
+
+        # Defensive: kill anything still alive if we're unwinding from an exception or Ctrl+C
+        if ($null -ne $Proc -and -not $Proc.HasExited) {
+            & taskkill.exe /PID $Proc.Id /T /F 1>$null 2>$null
+            $Proc.WaitForExit(5000) | Out-Null
+        }
     }
 
-    $Timer.Stop()
+    $ExitCode = if ($null -ne $Proc) { $Proc.ExitCode } else { -1 }
 
-    # Storing output for debugging
-    # $JobOutput = Receive-Job -Job $CurrentJob -Keep -ErrorAction Continue `
-    # -OutVariable JobOutput -ErrorVariable JobErrors
+    $Status = if ($TimedOut)         { 'Timed Out' }
+              elseif ($ExitCode -eq 0) { 'Completed' }
+              else                     { 'Error' }
 
-    $JobStatus = (Get-Job -Id $CurrentJob.Id).State
-
-    Remove-Job -Job $CurrentJob
-
-    if($JobStatus -eq 'Completed'){
-        Write-Host = "Job Succeeded"
-        return "Completed"
-    } elseif ($JobStatus -eq 'Stopped'){
-        return "Timed Out"
-    } else {
-        return "Error"
+    return [pscustomobject]@{
+        Status          = $Status
+        ExitCode        = $ExitCode
+        DurationSeconds = $Stopwatch.Elapsed.TotalSeconds
+        StdOutPath      = $StdOutPath
+        StdErrPath      = $StdErrPath
     }
+}
 
-    
+function Start-Cooldown {
+    [CmdletBinding()]
+    param([int]$Seconds)
+
+    if ($Seconds -le 0) { return }
+
+    $Stopwatch = [Diagnostics.Stopwatch]::StartNew()
+    while ($Stopwatch.Elapsed.TotalSeconds -lt $Seconds) {
+        $Remaining = [int]($Seconds - $Stopwatch.Elapsed.TotalSeconds)
+        $Pct       = [math]::Min(100, ($Stopwatch.Elapsed.TotalSeconds / $Seconds) * 100)
+        Write-Progress -Id 1 -ParentId 0 -Activity "Cooldown" `
+            -Status "Waiting ${Remaining}s before next URL" `
+            -PercentComplete $Pct
+        Start-Sleep -Seconds 1
+    }
+    Write-Progress -Id 1 -ParentId 0 -Activity "Cooldown" -Completed
 }
 
 # Pre-Flight Checks
@@ -137,25 +195,77 @@ if (-not (Get-Command java -ErrorAction SilentlyContinue)) {
     throw "Java is not installed or is missing from environment variables."
 }
 
-# Queue List
-$Urls = (
-    Get-Content -LiteralPath $QueueFile -ErrorAction Stop |
+# Queue List — normalize (lowercase + strip trailing slash) for dedup, keep first-seen casing for the rip
+$Seen = @{}
+$Urls = @(
+    Get-Content -LiteralPath $QueueFile |
         ForEach-Object { $_.Trim() } |
-        Where-Object { $_ -and ($_ -notmatch '^\s*#') } | # ignore blanks and '# comments'
-        Select-Object -Unique
+        Where-Object { $_ -and ($_ -notmatch '^\s*#') } |
+        ForEach-Object {
+            $Norm = $_.ToLowerInvariant().TrimEnd('/')
+            if (-not $Seen.ContainsKey($Norm)) {
+                $Seen[$Norm] = $true
+                $_
+            }
+        }
 )
 
-$Urls | ForEach-Object {
-    
-    Write-Host "Starting to Process: $_"
+if ($Urls.Count -eq 0) {
+    Write-Warning "Queue file '$QueueFile' contains no URLs after filtering blanks/comments. Nothing to do."
+    return
+}
+
+Write-Host "Processing $($Urls.Count) URL(s)."
+Write-Host "Log:       $LogFile"
+Write-Host "Temp logs: ${TempPrefix}_*.{stdout,stderr}.log"
+
+for ($i = 0; $i -lt $Urls.Count; $i++) {
+    $Url    = $Urls[$i]
+    $UrlNum = $i + 1
+
+    Write-Progress -Id 0 -Activity "RipMe Batch" `
+        -Status "URL $UrlNum of $($Urls.Count): $Url" `
+        -PercentComplete (($i / $Urls.Count) * 100)
+
+    Write-Host "[$UrlNum/$($Urls.Count)] Starting: $Url"
+
     $Result = $null
-    $Result = Invoke-Rip -Url $_
+    try {
+        $Result = Invoke-Rip -Url $Url -Index $UrlNum
+    }
+    catch {
+        # Catch-and-continue: log the exception to this URL's stderr file so StdErrPath stays meaningful
+        $IndexStr   = '{0:D3}' -f $UrlNum
+        $StdErrPath = "${TempPrefix}_${IndexStr}.stderr.log"
+        $_ | Out-String | Set-Content -LiteralPath $StdErrPath -Encoding UTF8
 
-    Write-Log -Level "Info" -Category $Result -Message $_
-
-    if($_ -ne $Urls[-1]){
-        Write-Host "Cooldown has begun, please wait..."
-        Start-Sleep -Seconds $CooldownSeconds
+        $Result = [pscustomobject]@{
+            Status          = 'Error'
+            ExitCode        = -1
+            DurationSeconds = 0
+            StdOutPath      = ''
+            StdErrPath      = $StdErrPath
+        }
+        Write-Warning "[$UrlNum/$($Urls.Count)] Invoke-Rip threw: $($_.Exception.Message)"
     }
 
+    Write-Host ("[{0}/{1}] {2} (exit={3}, duration={4:N1}s)" -f `
+        $UrlNum, $Urls.Count, $Result.Status, $Result.ExitCode, $Result.DurationSeconds)
+
+    Write-Log -Level Info `
+        -Status          $Result.Status `
+        -Url             $Url `
+        -ExitCode        $Result.ExitCode `
+        -DurationSeconds $Result.DurationSeconds `
+        -StdOutPath      $Result.StdOutPath `
+        -StdErrPath      $Result.StdErrPath
+
+    $IsLast = ($i -eq $Urls.Count - 1)
+    if (-not $IsLast) {
+        Write-Host "Cooldown: $CooldownSeconds seconds..."
+        Start-Cooldown -Seconds $CooldownSeconds
+    }
 }
+
+Write-Progress -Id 0 -Activity "RipMe Batch" -Completed
+Write-Host "Batch complete. See log: $LogFile"
