@@ -4,10 +4,10 @@ param(
     [Parameter(Mandatory)]
     [ValidateNotNullOrEmpty()]
     [ValidateScript({
-        if(-not (Test-Path $_)){
+        if(-not (Test-Path -LiteralPath $_)){
             throw "Queue file not found: $_"
         }
-        if((Get-ChildItem $_).Extension -ne ".txt"){
+        if((Get-ChildItem -LiteralPath $_).Extension -ne ".txt"){
             throw "Queue file must be a .txt file."
         }
         return $true
@@ -58,11 +58,11 @@ function Write-Log {
         [string]$StdOutPath = '',
         [string]$StdErrPath = '',
 
-        [string]$LogPath = $LogFile
+        [string]$LogPath = $script:LogFile
     )
 
-    $LogDir = Split-Path $LogPath
-    if (-not (Test-Path $LogDir)) {
+    $LogDir = Split-Path -LiteralPath $LogPath
+    if (-not (Test-Path -LiteralPath $LogDir)) {
         New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
     }
 
@@ -87,25 +87,24 @@ function Invoke-Rip {
         [string]$Url,
 
         [Parameter(Mandatory)]
-        [int]$Index
+        [string]$StdOutPath,
+
+        [Parameter(Mandatory)]
+        [string]$StdErrPath
     )
 
-    $IndexStr   = '{0:D3}' -f $Index
-    $StdOutPath = "${TempPrefix}_${IndexStr}.stdout.log"
-    $StdErrPath = "${TempPrefix}_${IndexStr}.stderr.log"
-
     $Arguments = @(
-        '-jar', $JarFile
-        '--ripsdirectory', $Output
+        '-jar', $script:JarFile
+        '--ripsdirectory', $script:Output
         '--url', $Url
-        '--threads', $Threads
+        '--threads', $script:Threads
         '--skip404'
     )
 
     $Proc      = $null
     $TimedOut  = $false
     $Stopwatch = [Diagnostics.Stopwatch]::StartNew()
-    $TimeoutMs = $TimeoutMinutes * 60 * 1000
+    $TimeoutMs = $script:TimeoutMinutes * 60 * 1000
 
     try {
         $Proc = Start-Process -FilePath 'java' `
@@ -121,7 +120,7 @@ function Invoke-Rip {
             }
             $Pct = [math]::Min(100, ($Stopwatch.ElapsedMilliseconds / $TimeoutMs) * 100)
             Write-Progress -Id 1 -ParentId 0 -Activity "Ripping: $Url" `
-                -Status ("Elapsed {0:N0}s / Timeout {1}s" -f $Stopwatch.Elapsed.TotalSeconds, ($TimeoutMinutes * 60)) `
+                -Status ("Elapsed {0:N0}s / Timeout {1}s" -f $Stopwatch.Elapsed.TotalSeconds, ($script:TimeoutMinutes * 60)) `
                 -PercentComplete $Pct
         }
 
@@ -142,9 +141,15 @@ function Invoke-Rip {
         }
     }
 
-    $ExitCode = if ($null -ne $Proc) { $Proc.ExitCode } else { -1 }
+    # A wedged JVM can survive both taskkill attempts. Guard ExitCode access — touching it on a
+    # live process throws InvalidOperationException — and report the zombie so the operator knows.
+    if ($null -ne $Proc -and -not $Proc.HasExited) {
+        Write-Warning "PID $($Proc.Id) did not terminate after taskkill; java may be wedged."
+    }
 
-    $Status = if ($TimedOut)         { 'Timed Out' }
+    $ExitCode = if ($null -ne $Proc -and $Proc.HasExited) { $Proc.ExitCode } else { -1 }
+
+    $Status = if ($TimedOut)           { 'Timed Out' }
               elseif ($ExitCode -eq 0) { 'Completed' }
               else                     { 'Error' }
 
@@ -198,7 +203,7 @@ if (-not (Get-Command java -ErrorAction SilentlyContinue)) {
 # Queue List — normalize (lowercase + strip trailing slash) for dedup, keep first-seen casing for the rip
 $Seen = @{}
 $Urls = @(
-    Get-Content -LiteralPath $QueueFile |
+    Get-Content -LiteralPath $QueueFile -Encoding UTF8 |
         ForEach-Object { $_.Trim() } |
         Where-Object { $_ -and ($_ -notmatch '^\s*#') } |
         ForEach-Object {
@@ -220,33 +225,38 @@ Write-Host "Log:       $LogFile"
 Write-Host "Temp logs: ${TempPrefix}_*.{stdout,stderr}.log"
 
 for ($i = 0; $i -lt $Urls.Count; $i++) {
-    $Url    = $Urls[$i]
-    $UrlNum = $i + 1
+    $Url        = $Urls[$i]
+    $UrlNum     = $i + 1
+    $IndexStr   = '{0:D3}' -f $UrlNum
+    $StdOutPath = "$($script:TempPrefix)_${IndexStr}.stdout.log"
+    $StdErrPath = "$($script:TempPrefix)_${IndexStr}.stderr.log"
 
     Write-Progress -Id 0 -Activity "RipMe Batch" `
         -Status "URL $UrlNum of $($Urls.Count): $Url" `
-        -PercentComplete (($i / $Urls.Count) * 100)
+        -PercentComplete (($UrlNum / $Urls.Count) * 100)
 
     Write-Host "[$UrlNum/$($Urls.Count)] Starting: $Url"
 
+    $IterationStopwatch = [Diagnostics.Stopwatch]::StartNew()
     $Result = $null
     try {
-        $Result = Invoke-Rip -Url $Url -Index $UrlNum
+        $Result = Invoke-Rip -Url $Url -StdOutPath $StdOutPath -StdErrPath $StdErrPath
     }
     catch {
         # Catch-and-continue: log the exception to this URL's stderr file so StdErrPath stays meaningful
-        $IndexStr   = '{0:D3}' -f $UrlNum
-        $StdErrPath = "${TempPrefix}_${IndexStr}.stderr.log"
         $_ | Out-String | Set-Content -LiteralPath $StdErrPath -Encoding UTF8
 
         $Result = [pscustomobject]@{
             Status          = 'Error'
             ExitCode        = -1
-            DurationSeconds = 0
+            DurationSeconds = $IterationStopwatch.Elapsed.TotalSeconds
             StdOutPath      = ''
             StdErrPath      = $StdErrPath
         }
         Write-Warning "[$UrlNum/$($Urls.Count)] Invoke-Rip threw: $($_.Exception.Message)"
+    }
+    finally {
+        $IterationStopwatch.Stop()
     }
 
     Write-Host ("[{0}/{1}] {2} (exit={3}, duration={4:N1}s)" -f `
